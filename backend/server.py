@@ -30,11 +30,6 @@ db = client[os.environ['DB_NAME']]
 
 TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN', '')
 
-# --- MongoDB Helpers ---
-def _doc_to_checkout(doc: dict) -> dict:
-    doc['id'] = str(doc.pop('_id', ''))
-    return doc
-
 
 # --- Telegram Bot Handlers ---
 async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
