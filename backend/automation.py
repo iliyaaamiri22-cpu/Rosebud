@@ -8,8 +8,12 @@ Tested Flow (verified working):
   4. Click first "Upgrade" button (Indie Dev - $15/month, lowest paid plan)
   5. Capture Stripe checkout URL via request listener
 """
+import os
 import asyncio
 import logging
+
+# Ensure Playwright finds browsers at the correct system path
+os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", "/pw-browsers")
 from playwright.async_api import async_playwright
 from tempmail import create_email, wait_for_magic_link
 
