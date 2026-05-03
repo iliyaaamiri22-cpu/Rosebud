@@ -1,0 +1,71 @@
+{
+  "theme": "dark",
+  "archetype": "7 (Electric & Neon)",
+  "typography": {
+    "headings": "Cabinet Grotesk, sans-serif",
+    "body": "Satoshi, sans-serif",
+    "mono": "JetBrains Mono, monospace"
+  },
+  "colors": {
+    "background": "#050505",
+    "surface": "#0A0A0C",
+    "surface_glass": "rgba(10, 10, 12, 0.7)",
+    "primary": "#00FF94",
+    "primary_hover": "#33FFAA",
+    "secondary": "#00F0FF",
+    "text_primary": "#FFFFFF",
+    "text_secondary": "#A1A1AA",
+    "border": "rgba(255, 255, 255, 0.08)"
+  },
+  "layout": {
+    "spacing_scale": "generous",
+    "container_max": "max-w-7xl",
+    "grid_system": "Bento Grid (Control Room Grid & Tetris Grid)"
+  },
+  "surfaces": {
+    "header": "Crystal Glassmorphism (backdrop-blur-xl, bg-[#0A0A0C]/70, border-b border-white/10)",
+    "cards": "Retro-Futurism / Dark Grid (flat surface #0A0A0C, 1px border-white/5, hover:border-[#00FF94]/30, subtle drop-shadow on hover)",
+    "terminal": "Deep black #000000 with border-[#00FF94]/30 and subtle scanline background"
+  },
+  "motion": {
+    "hover_state": "Slight lift (-translate-y-1) and glow (shadow-[0_0_15px_rgba(0,255,148,0.15)])",
+    "entrance": "Staggered fade-up (framer-motion)",
+    "accents": "React Fast Marquee for kinetic typography strips"
+  },
+  "components": {
+    "buttons": "Shadcn based but stripped of vercel look. Neon accents, sharp edges or subtle 4px radius. High contrast text.",
+    "icons": "lucide-react for UI, react-icons for brand logos (Telegram, Stripe)."
+  },
+  "media": {
+    "hero_background": {
+      "url": "https://images.pexels.com/photos/12627677/pexels-photo-12627677.jpeg",
+      "description": "Abstract futuristic 3D geometry, use with opacity 15% and mix-blend-screen as hero background overlay."
+    },
+    "features_background": {
+      "url": "https://images.pexels.com/photos/30820142/pexels-photo-30820142.jpeg",
+      "description": "Neon tunnel, use for How It Works / Features bento grid background."
+    },
+    "telegram_visual": {
+      "url": "https://images.unsplash.com/photo-1777371770396-b385260509f0",
+      "description": "Blurred telegram logo with blue lights, use for the bot status section."
+    }
+  },
+  "pages": {
+    "landing": {
+      "hero": "Massive typography (text-5xl to text-6xl+). 'One Command. Instant Checkout.' Terminal UI mockup demonstrating the '/gen_checkout' command yielding a Rosebud AI Stripe link.",
+      "how_it_works": "Bento grid (Tetris Mode). Steps: 1. Auto Temp Mail Binding. 2. Bot trigger (/gen_checkout). 3. Stripe Lowest Plan Link Generation.",
+      "status_indicator": "Live server status card. 'Bot Status: Online'. Glowing green dot. Recent generated checkouts scrolling.",
+      "history": "Control room style table showing mocked recent generated checkout sessions."
+    }
+  },
+  "instructions_to_main_agent": [
+    "Install fonts via CSS: @import url('https://api.fontshare.com/v2/css?f[]=cabinet-grotesk@800,500,700,400&f[]=satoshi@900,700,500,400&display=swap'); and @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');",
+    "Apply data-testid to all interactive elements and buttons (e.g., data-testid='start-bot-btn').",
+    "Build a custom 'Terminal Window' component for the Hero section using JetBrains Mono font to simulate the Telegram bot conversation.",
+    "Do NOT use pure white #FFF for backgrounds. The entire site is strictly Dark Mode (background #050505).",
+    "Use framer-motion for smooth entrance animations. Ensure direct children of grid are motion.div if animated.",
+    "Use react-fast-marquee for a kinetic typography ribbon separating sections ('FAST SIGNUPS • NO HASSLE').",
+    "Install and use lucide-react and react-icons for all iconography. Avoid missing logo placeholders.",
+    "Apply generously spaced sections (py-24 or py-32) and bento grids for the 'How it works' and 'History' segments."
+  ]
+}
