@@ -49,6 +49,14 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(text, parse_mode="MarkdownV2")
 
 
+def esc(text: str) -> str:
+    """Escape special characters for Telegram MarkdownV2"""
+    specials = r'_*[]()~`>#+-=|{}.!'
+    for c in specials:
+        text = text.replace(c, f'\\{c}')
+    return text
+
+
 async def gen_checkout_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     msg = await update.message.reply_text(
@@ -77,13 +85,6 @@ async def gen_checkout_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "status": "success"
             })
 
-            # Escape for MarkdownV2
-            def esc(text):
-                specials = r'_*[]()~`>#+-=|{}.!'
-                for c in specials:
-                    text = text.replace(c, f'\\{c}')
-                return text
-
             reply = (
                 "✅ *Checkout Generated Successfully\\!*\n\n"
                 f"📧 *Email:* `{esc(email)}`\n\n"
@@ -97,11 +98,6 @@ async def gen_checkout_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             error = result.get("error", "Unknown error")
             email = result.get("email", "N/A")
-            def esc(text):
-                specials = r'_*[]()~`>#+-=|{}.!'
-                for c in specials:
-                    text = text.replace(c, f'\\{c}')
-                return text
             await msg.edit_text(
                 f"❌ *Failed to generate checkout*\n\n"
                 f"📧 Email used: `{esc(email)}`\n"
@@ -112,11 +108,6 @@ async def gen_checkout_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     except Exception as e:
         logger.error(f"gen_checkout error: {e}")
-        def esc(text):
-            specials = r'_*[]()~`>#+-=|{}.!'
-            for c in specials:
-                text = text.replace(c, f'\\{c}')
-            return text
         await msg.edit_text(
             f"❌ *Error occurred*\n\n`{esc(str(e)[:200])}`\n\n_Try /gen\\_checkout again_",
             parse_mode="MarkdownV2"

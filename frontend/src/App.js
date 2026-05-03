@@ -232,7 +232,7 @@ function App() {
           >
             <a
               data-testid="telegram-btn"
-              href="https://t.me/"
+              href="https://t.me/Synax_Chk_bot"
               target="_blank"
               rel="noreferrer"
               className="btn-primary"
