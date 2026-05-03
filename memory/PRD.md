@@ -16,7 +16,24 @@ Ek Asia telegram bot bana jo ki isse pe auto signups using temp mail + stripe lo
 - **Temp Mail**: 1secmail.com API (free, no key needed)
 - **Automation**: Playwright headless Chromium
 
-## What's Been Implemented (May 3, 2026)
+## What's Been Implemented
+
+### Round 1 (May 3, 2026) - Initial Build
+- Telegram bot, landing page, basic automation structure
+
+### Round 2 (May 3, 2026) - All Bugs Fixed
+**Bugs Fixed:**
+1. **1secmail → MailTM**: 1secmail returned 403 Forbidden (server-side block). Completely replaced with MailTM API (api.mail.tm) - reliable, supports account creation + inbox reading
+2. **MailTM html field**: MailTM returns `html` as a list, not string. Fixed with `isinstance(html_raw, list)` check
+3. **Pricing page URL**: Was `/my-plan`, actual URL is `/profile/my-plan` (discovered via Playwright debug)
+4. **Automation simplified**: Removed complex nested fallback logic. Now: navigate to PLAN_PAGE → click first "Upgrade" button → capture `checkout.stripe.com/c/pay/` URL via request listener
+5. **Unused imports removed**: server.py cleaned of JSONResponse, BaseModel, Field, List, Annotated, ObjectId
+6. **MailTM rate limiting**: Added retry logic with backoff (up to 3 attempts, 30s wait)
+7. **Magic link extraction**: Fixed to handle MailTM's html-as-list format properly
+8. **No double-click bug**: automation.py completely rewritten without the duplicate click logic
+
+**End-to-end automation confirmed working:**
+- Email generated → Rosebud magic link received within 5 seconds → Login complete → 8 Upgrade buttons found → First click → Stripe checkout URL captured
 
 ### Telegram Bot
 - `/start` command with bot info
