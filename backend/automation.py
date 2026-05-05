@@ -69,27 +69,37 @@ async def generate_rosebud_checkout(progress_callback=None) -> dict:
 
             stripe_checkout_urls: list[str] = []
 
+            def _is_stripe_url(url: str) -> bool:
+                return "checkout.stripe.com" in url and ("cs_live_" in url or "cs_test_" in url)
+
             def _on_request(req):
                 url = req.url
-                if "checkout.stripe.com/c/pay/" in url:
+                if _is_stripe_url(url):
                     stripe_checkout_urls.append(url)
                     logger.info(f"[AUTO] Stripe URL captured (request): {url}")
 
             def _on_response(resp):
                 url = resp.url
-                if "checkout.stripe.com/c/pay/" in url and url not in stripe_checkout_urls:
+                if _is_stripe_url(url) and url not in stripe_checkout_urls:
                     stripe_checkout_urls.append(url)
                     logger.info(f"[AUTO] Stripe URL captured (response): {url}")
 
             def _on_popup(popup_page):
                 url = popup_page.url
-                if "checkout.stripe.com/c/pay/" in url and url not in stripe_checkout_urls:
+                if _is_stripe_url(url) and url not in stripe_checkout_urls:
                     stripe_checkout_urls.append(url)
                     logger.info(f"[AUTO] Stripe URL captured (popup): {url}")
+
+            def _on_framenavigated(frame):
+                url = frame.url
+                if _is_stripe_url(url) and url not in stripe_checkout_urls:
+                    stripe_checkout_urls.append(url)
+                    logger.info(f"[AUTO] Stripe URL captured (frame nav): {url}")
 
             page.on("request", _on_request)
             page.on("response", _on_response)
             page.on("popup", _on_popup)
+            page.on("framenavigated", _on_framenavigated)
 
             # Step 2: Navigate to rosebud.ai
             await report("navigate", "running", "Loading rosebud.ai...")
@@ -172,37 +182,103 @@ async def generate_rosebud_checkout(progress_callback=None) -> dict:
             await upgrade_buttons[0].click(force=True)
             logger.info("[AUTO] Clicked first Upgrade button, waiting for Stripe…")
 
-            # Try to detect Stripe checkout
+            # ── MULTI-LAYER STRIPE CHECKOUT CAPTURE ──
+
+            # Layer 1: Wait for same-tab navigation
             try:
                 await page.wait_for_url(
-                    lambda url: "checkout.stripe.com/c/pay/" in url,
-                    timeout=15000
+                    lambda url: _is_stripe_url(url),
+                    timeout=20000
                 )
                 nav_url = page.url
-                if nav_url not in stripe_checkout_urls:
+                if nav_url and _is_stripe_url(nav_url) and nav_url not in stripe_checkout_urls:
                     stripe_checkout_urls.append(nav_url)
                     logger.info(f"[AUTO] Stripe URL captured (navigation): {nav_url}")
             except Exception:
                 pass
 
+            # Layer 2: Wait for popup
             if not stripe_checkout_urls:
                 try:
-                    popup = await page.wait_for_event("popup", timeout=10000)
+                    popup = await page.wait_for_event("popup", timeout=15000)
                     popup_url = popup.url
-                    if "checkout.stripe.com/c/pay/" in popup_url and popup_url not in stripe_checkout_urls:
+                    if _is_stripe_url(popup_url) and popup_url not in stripe_checkout_urls:
                         stripe_checkout_urls.append(popup_url)
                         logger.info(f"[AUTO] Stripe URL captured (popup): {popup_url}")
                 except Exception:
                     pass
 
-            for _ in range(30):
+            # Layer 3: Wait for network idle then aggressive polling
+            try:
+                await page.wait_for_load_state("networkidle", timeout=20000)
+            except Exception:
+                pass
+
+            # Layer 4: Poll page.url, window.location.href, all pages, all frames
+            for i in range(60):  # 30 seconds total
                 if stripe_checkout_urls:
                     break
+
+                # Check main page URL
+                current_url = page.url
+                if _is_stripe_url(current_url) and current_url not in stripe_checkout_urls:
+                    stripe_checkout_urls.append(current_url)
+                    logger.info(f"[AUTO] Stripe URL captured (poll page.url): {current_url}")
+                    break
+
+                # Check window.location.href (includes hash fragment)
+                try:
+                    loc_href = await page.evaluate("window.location.href")
+                    if _is_stripe_url(loc_href) and loc_href not in stripe_checkout_urls:
+                        stripe_checkout_urls.append(loc_href)
+                        logger.info(f"[AUTO] Stripe URL captured (window.location): {loc_href}")
+                        break
+                except Exception:
+                    pass
+
+                # Check all pages in browser context
+                try:
+                    all_pages = context.pages
+                    for p in all_pages:
+                        p_url = p.url
+                        if _is_stripe_url(p_url) and p_url not in stripe_checkout_urls:
+                            stripe_checkout_urls.append(p_url)
+                            logger.info(f"[AUTO] Stripe URL captured (other page): {p_url}")
+                            break
+                except Exception:
+                    pass
+
+                # Check all frames
+                try:
+                    for frame in page.frames:
+                        f_url = frame.url
+                        if _is_stripe_url(f_url) and f_url not in stripe_checkout_urls:
+                            stripe_checkout_urls.append(f_url)
+                            logger.info(f"[AUTO] Stripe URL captured (frame): {f_url}")
+                            break
+                except Exception:
+                    pass
+
                 await asyncio.sleep(0.5)
 
-            if not stripe_checkout_urls and "checkout.stripe.com/c/pay/" in page.url:
-                stripe_checkout_urls.append(page.url)
-                logger.info(f"[AUTO] Stripe URL captured (last-resort page.url): {page.url}")
+            # Layer 5: If still nothing, try checking if any page navigated to stripe
+            if not stripe_checkout_urls:
+                try:
+                    all_pages = context.pages
+                    for p in all_pages:
+                        p_url = p.url
+                        if _is_stripe_url(p_url) and p_url not in stripe_checkout_urls:
+                            stripe_checkout_urls.append(p_url)
+                            logger.info(f"[AUTO] Stripe URL captured (final page scan): {p_url}")
+                except Exception:
+                    pass
+
+            # Layer 6: Check if main page URL has stripe (last resort)
+            if not stripe_checkout_urls:
+                final_url = page.url
+                if _is_stripe_url(final_url):
+                    stripe_checkout_urls.append(final_url)
+                    logger.info(f"[AUTO] Stripe URL captured (final page.url): {final_url}")
 
             if not stripe_checkout_urls:
                 await report("click_upgrade", "failed", "Stripe checkout URL not captured")
@@ -211,7 +287,9 @@ async def generate_rosebud_checkout(progress_callback=None) -> dict:
                     "error": "Stripe checkout URL not captured after clicking Upgrade",
                 }
 
-            checkout_url = stripe_checkout_urls[0]
+            # Return the longest URL (most complete, likely has all params + hash)
+            logger.info(f"[AUTO] All captured Stripe URLs ({len(stripe_checkout_urls)}): {stripe_checkout_urls}")
+            checkout_url = max(stripe_checkout_urls, key=len)
             await report("click_upgrade", "done", f"Checkout URL captured: {checkout_url[:60]}...")
             logger.info(f"[AUTO] Done. Checkout URL: {checkout_url}")
             return {"success": True, "email": email, "checkout_url": checkout_url}
