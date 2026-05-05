@@ -171,28 +171,66 @@ async def generate_rosebud_checkout(progress_callback=None) -> dict:
                 logger.info(f"[AUTO] Plan page URL: {page.url}")
                 await report("goto_pricing", "done")
 
-                # Step 9: Find & click first "Upgrade" button
-                await report("click_upgrade", "running", "Clicking upgrade button...")
+                # Step 9: Find & click first Upgrade / Subscribe / Get Started button
+                await report("click_upgrade", "running", "Finding upgrade button...")
+
+                # Multiple possible button texts Rosebud might use
+                BUY_KEYWORDS = ["upgrade", "subscribe", "get started", "start free", "start", "buy", "purchase", "choose", "select"]
+
+                # ── Strategy 1: Search buttons by text ──
                 upgrade_buttons = []
                 for btn in await page.query_selector_all("button"):
                     try:
                         text = (await btn.inner_text()).strip().lower()
-                        if text == "upgrade":
-                            upgrade_buttons.append(btn)
+                        if any(kw in text for kw in BUY_KEYWORDS):
+                            upgrade_buttons.append((btn, text))
                     except Exception:
                         pass
 
-                logger.info(f"[AUTO] Found {len(upgrade_buttons)} 'Upgrade' buttons")
+                logger.info(f"[AUTO] Found {len(upgrade_buttons)} matching BUTTONS: {[t for _,t in upgrade_buttons]}")
+
+                # ── Strategy 2: If no buttons, search <a> links ──
+                if not upgrade_buttons:
+                    for link in await page.query_selector_all("a"):
+                        try:
+                            text = (await link.inner_text()).strip().lower()
+                            if any(kw in text for kw in BUY_KEYWORDS):
+                                upgrade_buttons.append((link, text))
+                        except Exception:
+                            pass
+                    logger.info(f"[AUTO] Found {len(upgrade_buttons)} matching LINKS: {[t for _,t in upgrade_buttons]}")
+
+                # ── Strategy 3: Still nothing? Search page HTML for Stripe payment intent ──
+                if not upgrade_buttons:
+                    page_html = await page.content()
+                    page_lower = page_html.lower()
+                    if "checkout" in page_lower or "stripe" in page_lower:
+                        # Try to find any clickable element near pricing
+                        for el in await page.query_selector_all("[role='button'], .btn, .button, [class*='upgrade'], [class*='subscribe'], [class*='pricing']"):
+                            try:
+                                if await el.is_visible():
+                                    upgrade_buttons.append((el, "fallback-clickable"))
+                            except Exception:
+                                pass
+                        logger.info(f"[AUTO] Found {len(upgrade_buttons)} fallback clickable elements")
 
                 if not upgrade_buttons:
+                    # Save page HTML + screenshot for debugging
+                    try:
+                        await page.screenshot(path="/tmp/rosebud_pricing_debug.png")
+                        html_snippet = (await page.content())[:2000]
+                        logger.error(f"[AUTO] No button found. HTML snippet: {html_snippet}")
+                    except Exception:
+                        pass
                     await report("click_upgrade", "failed", "No Upgrade button found")
                     return {
                         "success": False, "email": email,
                         "error": "No 'Upgrade' button found on pricing page",
                     }
 
-                await upgrade_buttons[0].click(force=True)
-                logger.info("[AUTO] Clicked first Upgrade button, waiting for Stripe…")
+                target, btn_text = upgrade_buttons[0]
+                await target.click(force=True)
+                logger.info(f"[AUTO] Clicked '{btn_text}' button, waiting for Stripe…")
 
                 # ── MULTI-LAYER STRIPE CHECKOUT CAPTURE ──
 
