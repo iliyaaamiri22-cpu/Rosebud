@@ -62,12 +62,12 @@ async def make_progress_callback(chat_id: int):
 # ── Telegram Bot Handlers ──
 async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (
-        "🤖 *Rosebud Checkout Bot*\n\n"
-        "Generate a Stripe checkout link for Rosebud\.ai's lowest plan instantly\!\n\n"
-        "📌 *Commands:*\n"
-        "➤ /gen\_checkout — Auto signup \+ get checkout link\n"
-        "➤ /start — Show this message\n\n"
-        "_Type /gen\_checkout to begin\._"
+        r"🤖 *Rosebud Checkout Bot*" + "\n\n"
+        r"Generate a Stripe checkout link for Rosebud\.ai's lowest plan instantly\!" + "\n\n"
+        r"📌 *Commands:*" + "\n"
+        r"➤ /gen\_checkout — Auto signup \+ get checkout link" + "\n"
+        r"➤ /start — Show this message" + "\n\n"
+        r"_Type /gen\_checkout to begin\._"
     )
     await update.message.reply_text(text, parse_mode="MarkdownV2")
 
@@ -83,11 +83,11 @@ def esc(text: str) -> str:
 def build_success_message(email: str, checkout_url: str) -> str:
     """Build the final success message with inline open button."""
     return (
-        "✅ *Checkout Generated Successfully\!*\n\n"
-        f"📧 *Email:* `{esc(email)}`\n\n"
-        f"🔗 *Checkout Link:*\n"
-        f"`{esc(checkout_url)}`\n\n"
-        "👇 Tap below to open checkout\!"
+        r"✅ *Checkout Generated Successfully\!*" + "\n\n"
+        f"📧 *Email:* `{esc(email)}`" + "\n\n"
+        f"🔗 *Checkout Link:*" + "\n"
+        f"`{esc(checkout_url)}`" + "\n\n"
+        r"👇 Tap below to open checkout\!"
     )
 
 
@@ -96,24 +96,24 @@ async def gen_checkout_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Send initial live progress message
     msg = await update.message.reply_text(
-        "⏳ *Starting checkout generation\.\.\.*\n\n"
-        "1️⃣  Creating temp email\.\.\.\n"
-        "2️⃣  Signing up on Rosebud\.ai\n"
-        "3️⃣  Waiting for verification email\n"
-        "4️⃣  Extracting checkout link\n\n"
-        "_This may take 60\-120 seconds\._",
+        r"⏳ *Starting checkout generation\.\.\.*" + "\n\n"
+        r"1️⃣  Creating temp email\.\.\." + "\n"
+        r"2️⃣  Signing up on Rosebud\.ai" + "\n"
+        r"3️⃣  Waiting for verification email" + "\n"
+        r"4️⃣  Extracting checkout link" + "\n\n"
+        r"_This may take 60\-120 seconds\._",
         parse_mode="MarkdownV2"
     )
 
     progress_steps = {
-        "create_email": "1️⃣  Creating temp email...",
-        "navigate": "2️⃣  Loading Rosebud\.ai...",
-        "open_signin": "2️⃣  Opening sign\-in modal...",
-        "submit_email": "2️⃣  Submitting email...",
-        "wait_email": "3️⃣  Waiting for verification email...",
-        "login": "3️⃣  Logging in with magic link...",
-        "goto_pricing": "4️⃣  Navigating to pricing...",
-        "click_upgrade": "4️⃣  Extracting checkout link...",
+        "create_email": r"1️⃣  Creating temp email...",
+        "navigate": r"2️⃣  Loading Rosebud\.ai...",
+        "open_signin": r"2️⃣  Opening sign\-in modal...",
+        "submit_email": r"2️⃣  Submitting email...",
+        "wait_email": r"3️⃣  Waiting for verification email...",
+        "login": r"3️⃣  Logging in with magic link...",
+        "goto_pricing": r"4️⃣  Navigating to pricing...",
+        "click_upgrade": r"4️⃣  Extracting checkout link...",
     }
 
     async def update_progress(step_name, step_num, total_steps, status, detail):
@@ -126,7 +126,7 @@ async def gen_checkout_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             step_label = f"⏳ {step_label}"
 
         lines = [
-            "⏳ *Processing your request\.\.\.*\n",
+            r"⏳ *Processing your request\.\.\.*" + "\n",
             step_label + "\n",
             f"_Step {step_num}/{total_steps} — {esc(detail[:80]) if detail else 'in progress'}_",
         ]
@@ -163,17 +163,19 @@ async def gen_checkout_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             error = result.get("error", "Unknown error")
             email = result.get("email", "N/A")
             await msg.edit_text(
-                f"❌ *Failed to generate checkout*\n\n"
-                f"📧 Email used: `{esc(email)}`\n"
-                f"⚠️ Error: {esc(error)}\n\n"
-                "_Please try again with /gen\_checkout_",
+                r"❌ *Failed to generate checkout*" + "\n\n"
+                f"📧 Email used: `{esc(email)}`" + "\n"
+                f"⚠️ Error: {esc(error)}" + "\n\n"
+                r"_Please try again with /gen\_checkout_",
                 parse_mode="MarkdownV2"
             )
 
     except Exception as e:
         logger.error(f"gen_checkout error: {e}")
         await msg.edit_text(
-            f"❌ *Error occurred*\n\n`{esc(str(e)[:200])}`\n\n_Try /gen\_checkout again_",
+            r"❌ *Error occurred*" + "\n\n"
+            f"`{esc(str(e)[:200])}`" + "\n\n"
+            r"_Try /gen\_checkout again_",
             parse_mode="MarkdownV2"
         )
 

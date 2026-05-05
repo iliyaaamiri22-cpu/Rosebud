@@ -5,7 +5,8 @@ import os
 import asyncio
 import logging
 
-os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", "/pw-browsers")
+# Allow Playwright to auto-discover browsers from default install path
+os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", "")
 from playwright.async_api import async_playwright
 from tempmail import create_email, wait_for_magic_link
 
