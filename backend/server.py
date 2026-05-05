@@ -6,7 +6,7 @@ import asyncio
 from pathlib import Path
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, ContextTypes
-from automation import generate_rosebud_checkout
+from automation import generate_rosebud_checkout, generate_rosebud_checkouts
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -27,9 +27,10 @@ def esc(text: str) -> str:
 async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (
         r"🤖 *Rosebud Checkout Bot*" + "\n\n"
-        r"Generate a Stripe checkout link for Rosebud\.ai's lowest plan instantly\!" + "\n\n"
+        r"Generate Stripe checkout links for Rosebud\.ai instantly\!" + "\n\n"
         r"📌 *Commands:*" + "\n"
-        r"➤ /gen\_checkout — Auto signup \+ get checkout link" + "\n"
+        r"➤ /gen\_checkout — Single checkout link" + "\n"
+        r"➤ /bulk\_checkout \<number\> — Multiple in parallel" + "\n"
         r"➤ /start — Show this message" + "\n\n"
         r"_Type /gen\_checkout to begin\._"
     )
@@ -43,7 +44,7 @@ async def gen_checkout_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         r"2️⃣  Signing up on Rosebud\.ai" + "\n"
         r"3️⃣  Waiting for verification email" + "\n"
         r"4️⃣  Extracting checkout link" + "\n\n"
-        r"_This may take 60\-120 seconds\._",
+        r"_This may take 40\-90 seconds\._",
         parse_mode="MarkdownV2"
     )
 
@@ -116,6 +117,69 @@ async def gen_checkout_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 
+async def bulk_checkout_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /bulk_checkout <number> — generate multiple checkouts in parallel."""
+    args = context.args
+    if not args:
+        await update.message.reply_text(
+            r"⚠️ Usage: /bulk\_checkout \<number\>" + "\n\n"
+            r"Example: /bulk\_checkout 5",
+            parse_mode="MarkdownV2"
+        )
+        return
+
+    try:
+        count = int(args[0])
+        if count < 1 or count > 10:
+            await update.message.reply_text(
+                r"⚠️ Please specify a number between 1 and 10\.",
+                parse_mode="MarkdownV2"
+            )
+            return
+    except ValueError:
+        await update.message.reply_text(
+            r"⚠️ Invalid number\. Usage: /bulk\_checkout \<number\>",
+            parse_mode="MarkdownV2"
+        )
+        return
+
+    header = "⏳ *Bulk Checkout: Generating " + str(count) + " links in parallel...*"
+    msg = await update.message.reply_text(header, parse_mode="MarkdownV2")
+
+    try:
+        results = await generate_rosebud_checkouts(count=count)
+
+        success_count = sum(1 for r in results if r["success"])
+        failed_count = count - success_count
+
+        lines = [
+            r"✅ *Bulk Checkout Complete\!*" + "\n\n",
+            "📊 Results: " + str(success_count) + " success, " + str(failed_count) + " failed" + "\n\n",
+        ]
+
+        for i, r in enumerate(results, 1):
+            if r["success"]:
+                lines.append(str(i) + r"\. ✅ `" + esc(r['email']) + "`" + "\n")
+                lines.append("   🔗 `" + esc(r['checkout_url'][:80]) + "…`" + "\n\n")
+            else:
+                lines.append(str(i) + r"\. ❌ `" + esc(r['email']) + "` — " + esc(r.get('error', 'Failed')[:40]) + "\n\n")
+
+        text = "".join(lines)
+        # Telegram has 4096 char limit
+        if len(text) > 4000:
+            text = text[:3990] + "\n\n_…truncated_"
+
+        await msg.edit_text(text, parse_mode="MarkdownV2")
+
+    except Exception as e:
+        logger.error(f"bulk_checkout error: {e}")
+        await msg.edit_text(
+            r"❌ *Bulk checkout failed*" + "\n\n"
+            f"`{esc(str(e)[:200])}`",
+            parse_mode="MarkdownV2"
+        )
+
+
 telegram_app = None
 
 async def start_telegram_bot():
@@ -127,6 +191,7 @@ async def start_telegram_bot():
         telegram_app = Application.builder().token(TELEGRAM_TOKEN).build()
         telegram_app.add_handler(CommandHandler("start", start_cmd))
         telegram_app.add_handler(CommandHandler("gen_checkout", gen_checkout_cmd))
+        telegram_app.add_handler(CommandHandler("bulk_checkout", bulk_checkout_cmd))
         await telegram_app.initialize()
         await telegram_app.start()
         await telegram_app.updater.start_polling(allowed_updates=Update.ALL_TYPES)
