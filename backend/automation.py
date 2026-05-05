@@ -4,6 +4,7 @@ Playwright automation for rosebud.ai signup & Stripe checkout extraction.
 import os
 import asyncio
 import logging
+import re
 from urllib.parse import urlparse
 
 # Allow Playwright to auto-discover browsers from default install path
@@ -83,6 +84,26 @@ async def generate_rosebud_checkout(progress_callback=None) -> dict:
                 page = await context.new_page()
 
                 stripe_checkout_urls: list[str] = []
+                _pending_responses: list = []
+
+                def _is_stripe_url(url: str) -> bool:
+                    try:
+                        parsed = urlparse(url)
+                        hostname = parsed.hostname or ""
+                        return hostname == "checkout.stripe.com" and ("cs_live_" in url or "cs_test_" in url)
+                    except Exception:
+                        return False
+
+                def _scan_text_for_stripe(text: str) -> str | None:
+                    patterns = [
+                        r"https://checkout\.stripe\.com/c/pay/cs_live_[a-zA-Z0-9_]+[^\"'\s<>]*",
+                        r"https://checkout\.stripe\.com/c/pay/cs_test_[a-zA-Z0-9_]+[^\"'\s<>]*",
+                    ]
+                    for pat in patterns:
+                        match = re.search(pat, text)
+                        if match:
+                            return match.group(0)
+                    return None
 
                 def _on_request(req):
                     url = req.url
@@ -95,6 +116,8 @@ async def generate_rosebud_checkout(progress_callback=None) -> dict:
                     if _is_stripe_url(url) and url not in stripe_checkout_urls:
                         stripe_checkout_urls.append(url)
                         logger.info(f"[AUTO] Stripe URL captured (response): {url}")
+                    # Store response object for later body scanning
+                    _pending_responses.append(resp)
 
                 def _on_popup(popup_page):
                     url = popup_page.url
@@ -357,11 +380,22 @@ async def generate_rosebud_checkout(progress_callback=None) -> dict:
                     except Exception:
                         pass
 
-                # Layer 3: Wait for network idle then aggressive polling
+                # Layer 3: Wait for network idle + scan response bodies
                 try:
                     await page.wait_for_load_state("networkidle", timeout=20000)
                 except Exception:
                     pass
+
+                # Scan all collected response bodies for Stripe URL
+                for resp in _pending_responses:
+                    try:
+                        body = await resp.text()
+                        found = _scan_text_for_stripe(body)
+                        if found and found not in stripe_checkout_urls:
+                            stripe_checkout_urls.append(found)
+                            logger.info(f"[AUTO] Stripe URL captured (response body scan): {found}")
+                    except Exception:
+                        pass
 
                 # Layer 4: Poll page.url, window.location.href, all pages, all frames
                 for i in range(40):  # 20 seconds total
@@ -408,6 +442,17 @@ async def generate_rosebud_checkout(progress_callback=None) -> dict:
                     except Exception:
                         pass
 
+                    # Scan page HTML for any embedded Stripe URL
+                    try:
+                        html = await page.content()
+                        found = _scan_text_for_stripe(html)
+                        if found and found not in stripe_checkout_urls:
+                            stripe_checkout_urls.append(found)
+                            logger.info(f"[AUTO] Stripe URL captured (page HTML): {found}")
+                            break
+                    except Exception:
+                        pass
+
                     await asyncio.sleep(0.5)
 
                 # Layer 5: If still nothing, try checking if any page navigated to stripe
@@ -429,7 +474,19 @@ async def generate_rosebud_checkout(progress_callback=None) -> dict:
                         stripe_checkout_urls.append(final_url)
                         logger.info(f"[AUTO] Stripe URL captured (final page.url): {final_url}")
 
+                # Layer 7: Debug — dump ALL request URLs to understand what's happening
                 if not stripe_checkout_urls:
+                    try:
+                        await page.screenshot(path="/tmp/rosebud_stripe_debug.png")
+                        logger.error(f"[AUTO] ALL page URLs: {[p.url for p in context.pages]}")
+                        logger.error(f"[AUTO] Current page URL: {page.url}")
+                        # Try to extract any checkout-like URL from page content
+                        html = await page.content()
+                        all_urls = re.findall(r'https?://[^"\'\s<>]+', html)
+                        stripe_like = [u for u in all_urls if 'stripe.com' in u or 'checkout' in u]
+                        logger.error(f"[AUTO] Stripe-like URLs in HTML: {stripe_like[:20]}")
+                    except Exception:
+                        pass
                     await report("click_upgrade", "failed", "Stripe checkout URL not captured")
                     return {
                         "success": False, "email": email,
