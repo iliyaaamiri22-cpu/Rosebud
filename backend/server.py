@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter
+from fastapi import FastAPI, APIRouter, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
@@ -6,13 +6,11 @@ from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import logging
 import asyncio
+import json
 from pathlib import Path
-from pydantic import BaseModel, Field
-from typing import List, Optional, Annotated
 from datetime import datetime, timezone
-from contextlib import asynccontextmanager
-from bson import ObjectId
-from telegram import Update
+from typing import Optional, Dict
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, ContextTypes
 from automation import generate_rosebud_checkout
 
@@ -30,16 +28,46 @@ db = client[os.environ['DB_NAME']]
 
 TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN', '')
 
+# ── WebSocket connections ──
+active_websockets: Dict[int, WebSocket] = {}
 
-# --- Telegram Bot Handlers ---
+
+async def broadcast_progress(chat_id: int, step: str, step_num: int, total: int, status: str, detail: str):
+    """Send progress update to connected frontend WebSocket clients."""
+    payload = {
+        "type": "progress",
+        "chat_id": chat_id,
+        "step": step,
+        "step_num": step_num,
+        "total": total,
+        "status": status,
+        "detail": detail,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+    ws = active_websockets.get(chat_id)
+    if ws:
+        try:
+            await ws.send_json(payload)
+        except Exception:
+            pass
+
+
+# ── Progress callback for automation ──
+async def make_progress_callback(chat_id: int):
+    async def cb(step_name, step_num, total_steps, status, detail):
+        await broadcast_progress(chat_id, step_name, step_num, total_steps, status, detail)
+    return cb
+
+
+# ── Telegram Bot Handlers ──
 async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (
         "🤖 *Rosebud Checkout Bot*\n\n"
-        "Generate a Stripe checkout link for Rosebud\\.ai's lowest plan instantly\\!\n\n"
+        "Generate a Stripe checkout link for Rosebud\.ai's lowest plan instantly\!\n\n"
         "📌 *Commands:*\n"
-        "➤ /gen\\_checkout — Auto signup \\+ get checkout link\n"
+        "➤ /gen\_checkout — Auto signup \+ get checkout link\n"
         "➤ /start — Show this message\n\n"
-        "_Type /gen\\_checkout to begin\\._"
+        "_Type /gen\_checkout to begin\._"
     )
     await update.message.reply_text(text, parse_mode="MarkdownV2")
 
@@ -52,20 +80,63 @@ def esc(text: str) -> str:
     return text
 
 
+def build_success_message(email: str, checkout_url: str) -> str:
+    """Build the final success message with inline open button."""
+    return (
+        "✅ *Checkout Generated Successfully\!*\n\n"
+        f"📧 *Email:* `{esc(email)}`\n\n"
+        f"🔗 *Checkout Link:*\n"
+        f"`{esc(checkout_url)}`\n\n"
+        "👇 Tap below to open checkout\!"
+    )
+
+
 async def gen_checkout_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
+
+    # Send initial live progress message
     msg = await update.message.reply_text(
-        "⏳ *Processing your request\\.\\.\\.*\n\n"
-        "1\\. Generating temp email ✅\n"
-        "2\\. Signing up on Rosebud\\.ai ⏳\n"
-        "3\\. Waiting for verification email ⏳\n"
-        "4\\. Extracting checkout link ⏳\n\n"
-        "_This may take 60\\-120 seconds\\._",
+        "⏳ *Starting checkout generation\.\.\.*\n\n"
+        "1️⃣  Creating temp email\.\.\.\n"
+        "2️⃣  Signing up on Rosebud\.ai\n"
+        "3️⃣  Waiting for verification email\n"
+        "4️⃣  Extracting checkout link\n\n"
+        "_This may take 60\-120 seconds\._",
         parse_mode="MarkdownV2"
     )
 
+    progress_steps = {
+        "create_email": "1️⃣  Creating temp email...",
+        "navigate": "2️⃣  Loading Rosebud\.ai...",
+        "open_signin": "2️⃣  Opening sign\-in modal...",
+        "submit_email": "2️⃣  Submitting email...",
+        "wait_email": "3️⃣  Waiting for verification email...",
+        "login": "3️⃣  Logging in with magic link...",
+        "goto_pricing": "4️⃣  Navigating to pricing...",
+        "click_upgrade": "4️⃣  Extracting checkout link...",
+    }
+
+    async def update_progress(step_name, step_num, total_steps, status, detail):
+        step_label = progress_steps.get(step_name, step_name.replace("_", " ").title())
+        if status == "done":
+            step_label = step_label.replace("...", " ✅")
+        elif status == "failed":
+            step_label = step_label.replace("...", " ❌")
+        else:
+            step_label = f"⏳ {step_label}"
+
+        lines = [
+            "⏳ *Processing your request\.\.\.*\n",
+            step_label + "\n",
+            f"_Step {step_num}/{total_steps} — {esc(detail[:80]) if detail else 'in progress'}_",
+        ]
+        try:
+            await msg.edit_text("".join(lines), parse_mode="MarkdownV2")
+        except Exception:
+            pass
+
     try:
-        result = await generate_rosebud_checkout()
+        result = await generate_rosebud_checkout(progress_callback=update_progress)
 
         if result["success"]:
             email = result["email"]
@@ -80,15 +151,13 @@ async def gen_checkout_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "status": "success"
             })
 
-            reply = (
-                "✅ *Checkout Generated Successfully\\!*\n\n"
-                f"📧 *Email:* `{esc(email)}`\n\n"
-                f"🔗 *Checkout Link:*\n"
-                f"`{esc(checkout)}`\n\n"
-                "👆 Copy the link and complete your purchase\\!\n"
-                "_Email is temp — link expires soon\\._"
-            )
-            await msg.edit_text(reply, parse_mode="MarkdownV2")
+            # Build reply with inline button
+            reply = build_success_message(email, checkout)
+            keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔗 Open Checkout", url=checkout)],
+                [InlineKeyboardButton("🔄 Generate Another", callback_data="gen_checkout")],
+            ])
+            await msg.edit_text(reply, parse_mode="MarkdownV2", reply_markup=keyboard)
 
         else:
             error = result.get("error", "Unknown error")
@@ -97,19 +166,19 @@ async def gen_checkout_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"❌ *Failed to generate checkout*\n\n"
                 f"📧 Email used: `{esc(email)}`\n"
                 f"⚠️ Error: {esc(error)}\n\n"
-                "_Please try again with /gen\\_checkout_",
+                "_Please try again with /gen\_checkout_",
                 parse_mode="MarkdownV2"
             )
 
     except Exception as e:
         logger.error(f"gen_checkout error: {e}")
         await msg.edit_text(
-            f"❌ *Error occurred*\n\n`{esc(str(e)[:200])}`\n\n_Try /gen\\_checkout again_",
+            f"❌ *Error occurred*\n\n`{esc(str(e)[:200])}`\n\n_Try /gen\_checkout again_",
             parse_mode="MarkdownV2"
         )
 
 
-# --- Bot lifecycle ---
+# ── Bot lifecycle ──
 telegram_app: Optional[Application] = None
 
 
@@ -141,7 +210,9 @@ async def stop_telegram_bot():
             logger.error(f"Error stopping bot: {e}")
 
 
-# --- FastAPI App ---
+# ── FastAPI App ──
+from contextlib import asynccontextmanager
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     asyncio.create_task(start_telegram_bot())
@@ -154,7 +225,7 @@ app = FastAPI(lifespan=lifespan)
 api_router = APIRouter(prefix="/api")
 
 
-# --- API Endpoints ---
+# ── API Endpoints ──
 @api_router.get("/")
 async def root():
     return {"message": "Rosebud Checkout Bot API", "bot_active": telegram_app is not None}
@@ -204,3 +275,42 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# ── WebSocket Endpoint for Live Progress ──
+@app.websocket("/ws")
+async def websocket_endpoint(ws: WebSocket):
+    await ws.accept()
+    chat_id = None
+    try:
+        # First message must identify the client
+        data = await ws.receive_text()
+        try:
+            payload = json.loads(data)
+            chat_id = payload.get("chat_id")
+        except json.JSONDecodeError:
+            chat_id = int(data)
+
+        if chat_id:
+            active_websockets[chat_id] = ws
+            await ws.send_json({"type": "connected", "chat_id": chat_id})
+            logger.info(f"WebSocket connected for chat_id: {chat_id}")
+        else:
+            await ws.send_json({"type": "error", "message": "chat_id required"})
+            await ws.close()
+            return
+
+        # Keep connection alive
+        while True:
+            data = await ws.receive_text()
+            # Echo heartbeat
+            if data == "ping":
+                await ws.send_text("pong")
+
+    except WebSocketDisconnect:
+        logger.info(f"WebSocket disconnected for chat_id: {chat_id}")
+    except Exception as e:
+        logger.error(f"WebSocket error: {e}")
+    finally:
+        if chat_id and chat_id in active_websockets:
+            del active_websockets[chat_id]
