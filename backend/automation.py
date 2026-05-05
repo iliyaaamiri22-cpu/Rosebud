@@ -194,158 +194,153 @@ async def generate_rosebud_checkout(progress_callback=None) -> dict:
                 logger.info(f"[AUTO] Plan page URL: {page.url}")
                 await report("goto_pricing", "done")
 
-                # Step 9: Find & click first Upgrade / Subscribe / Get Started button
+                # Step 9: Find & click the correct upgrade/subscribe button
                 await report("click_upgrade", "running", "Finding upgrade button...")
 
-                BUY_KEYWORDS = ["upgrade", "subscribe", "get started", "start free",
-                                "start", "buy", "purchase", "choose", "select",
-                                "continue", "pay", "pro", "premium", "plan"]
+                # ── Smart button scoring system ──
+                EXCLUDE_TEXTS = ["projects", "credits", "details", "more", "faq", "help",
+                                 "settings", "profile", "sign out", "logout", "back",
+                                 "cancel", "close", "menu", "home"]
 
-                upgrade_buttons = []
+                def _score_button(text: str) -> int:
+                    """Return score: higher = better match. -1 = exclude."""
+                    t = text.lower().strip()
 
-                # ── Deep page analysis: log ALL buttons & links for debugging ──
-                all_buttons_text = []
+                    # Exclude navigation/misc buttons
+                    if any(excl in t for excl in EXCLUDE_TEXTS):
+                        return -1
+
+                    # Exact matches (highest priority)
+                    if t == "upgrade":
+                        return 100
+                    if t == "buy":
+                        return 90
+                    if t == "subscribe":
+                        return 80
+                    if t == "get started":
+                        return 75
+                    if t == "start free":
+                        return 70
+
+                    # Partial matches
+                    if "upgrade" in t:
+                        return 60
+                    if "subscribe" in t:
+                        return 50
+                    if "buy" in t and "credit" not in t:
+                        return 45
+                    if "get started" in t:
+                        return 40
+                    if "start free" in t:
+                        return 35
+                    if "purchase" in t:
+                        return 30
+                    if "choose" in t or "select" in t:
+                        return 25
+                    if "pay" in t:
+                        return 20
+                    if "pro" in t or "premium" in t or "plan" in t:
+                        return 15
+                    if "continue" in t:
+                        return 10
+
+                    return 0
+
+                # ── Deep page analysis: log ALL buttons & links ──
+                all_buttons = []  # (element, text, score)
                 for btn in await page.query_selector_all("button"):
                     try:
                         txt = (await btn.inner_text()).strip()
                         if txt:
-                            all_buttons_text.append(txt)
+                            score = _score_button(txt)
+                            all_buttons.append((btn, txt, score))
                     except Exception:
                         pass
 
-                all_links_text = []
+                all_links = []
                 for link in await page.query_selector_all("a"):
                     try:
                         txt = (await link.inner_text()).strip()
                         href = await link.get_attribute("href") or ""
                         if txt:
-                            all_links_text.append(f"'{txt}' -> {href}")
+                            score = _score_button(txt)
+                            all_links.append((link, txt, score, href))
                     except Exception:
                         pass
 
-                logger.info(f"[AUTO] ALL buttons on page ({len(all_buttons_text)}): {all_buttons_text}")
-                logger.info(f"[AUTO] ALL links on page ({len(all_links_text)}): {all_links_text[:20]}")
+                logger.info(f"[AUTO] ALL buttons: {[(t, s) for _, t, s in all_buttons]}")
+                logger.info(f"[AUTO] ALL links: {[(t, s, h) for _, t, s, h in all_links[:10]]}")
 
-                # ── Strategy 1: Exact/partial text match on <button> ──
-                for btn in await page.query_selector_all("button"):
-                    try:
-                        text = (await btn.inner_text()).strip().lower()
-                        if any(kw in text for kw in BUY_KEYWORDS):
-                            upgrade_buttons.append((btn, text))
-                    except Exception:
-                        pass
-                logger.info(f"[AUTO] Strategy 1 BUTTONS: {len(upgrade_buttons)} -> {[t for _,t in upgrade_buttons]}")
+                # ── Pick best candidate from buttons first, then links ──
+                candidates = []
 
-                # ── Strategy 2: Text match on <a> links ──
-                if not upgrade_buttons:
-                    for link in await page.query_selector_all("a"):
-                        try:
-                            text = (await link.inner_text()).strip().lower()
-                            if any(kw in text for kw in BUY_KEYWORDS):
-                                upgrade_buttons.append((link, text))
-                        except Exception:
-                            pass
-                    logger.info(f"[AUTO] Strategy 2 LINKS: {len(upgrade_buttons)} -> {[t for _,t in upgrade_buttons]}")
+                # Buttons
+                for el, txt, score in all_buttons:
+                    if score > 0:
+                        candidates.append((el, txt, score, "button"))
 
-                # ── Strategy 3: Use Playwright locators (more robust) ──
-                if not upgrade_buttons:
-                    for kw in BUY_KEYWORDS:
-                        try:
-                            loc = page.get_by_role("button", name=kw, exact=False)
-                            cnt = await loc.count()
-                            if cnt > 0:
-                                upgrade_buttons.append((loc.first, f"locator:{kw}"))
-                                break
-                        except Exception:
-                            pass
-                    logger.info(f"[AUTO] Strategy 3 LOCATOR buttons: {len(upgrade_buttons)}")
+                # Links (lower priority than buttons)
+                for el, txt, score, href in all_links:
+                    if score > 0:
+                        candidates.append((el, txt, score - 5, f"link:{href}"))
 
-                # ── Strategy 4: CSS class-based selectors (common patterns) ──
-                if not upgrade_buttons:
-                    css_selectors = [
-                        "button[class*='upgrade']", "button[class*='subscribe']",
-                        "button[class*='plan']", "button[class*='pro']",
-                        "button[class*='buy']", "button[class*='pay']",
-                        "a[class*='upgrade']", "a[class*='subscribe']",
-                        "[data-testid*='upgrade']", "[data-testid*='subscribe']",
-                        "[id*='upgrade']", "[id*='subscribe']",
-                    ]
-                    for sel in css_selectors:
-                        try:
-                            el = await page.query_selector(sel)
-                            if el:
-                                txt = (await el.inner_text()).strip() or sel
-                                upgrade_buttons.append((el, txt))
-                                break
-                        except Exception:
-                            pass
-                    logger.info(f"[AUTO] Strategy 4 CSS selectors: {len(upgrade_buttons)}")
+                # Sort by score descending
+                candidates.sort(key=lambda x: x[2], reverse=True)
 
-                # ── Strategy 5: Any visible clickable element that looks like CTA ──
-                if not upgrade_buttons:
-                    all_clickables = await page.query_selector_all("button, a[href], [role='button'], input[type='submit']")
-                    for el in all_clickables:
-                        try:
-                            visible = await el.is_visible()
-                            txt = (await el.inner_text()).strip().lower()
-                            if visible and len(txt) > 0 and len(txt) < 40:
-                                upgrade_buttons.append((el, txt))
-                        except Exception:
-                            pass
-                    logger.info(f"[AUTO] Strategy 5 ALL visible clickables: {len(upgrade_buttons)} -> {[t for _,t in upgrade_buttons[:10]]}")
+                logger.info(f"[AUTO] Scored candidates: {[(t, s, src) for _, t, s, src in candidates[:10]]}")
 
-                # ── Strategy 6: Intercept Stripe checkout URL directly from page scripts ──
-                if not upgrade_buttons:
-                    try:
-                        stripe_url = await page.evaluate(r"""
-                            () => {
-                                for (const key in window) {
-                                    try {
-                                        const val = window[key];
-                                        if (typeof val === 'string' && val.includes('checkout.stripe.com') && val.includes('cs_live_')) {
-                                            return val;
-                                        }
-                                    } catch(e) {}
-                                }
-                                const scripts = document.querySelectorAll('script');
-                                for (const s of scripts) {
-                                    const text = s.textContent || '';
-                                    const match = text.match(/(https:\/\/checkout\.stripe\.com\/c\/pay\/cs_live_[^"'\s]+)/);
-                                    if (match) return match[1];
-                                }
-                                return null;
+                # ── Strategy: Extract Stripe URL directly from page scripts (no click needed) ──
+                try:
+                    stripe_url = await page.evaluate(r"""
+                        () => {
+                            for (const key in window) {
+                                try {
+                                    const val = window[key];
+                                    if (typeof val === 'string' && val.includes('checkout.stripe.com') && val.includes('cs_live_')) {
+                                        return val;
+                                    }
+                                } catch(e) {}
                             }
-                        """)
-                        if stripe_url and _is_stripe_url(stripe_url):
-                            logger.info(f"[AUTO] Strategy 6: Found Stripe URL in page scripts: {stripe_url}")
-                            await report("click_upgrade", "done", "Checkout URL found in page data")
-                            return {"success": True, "email": email, "checkout_url": stripe_url}
-                    except Exception as e:
-                        logger.info(f"[AUTO] Strategy 6 failed: {e}")
+                            const scripts = document.querySelectorAll('script');
+                            for (const s of scripts) {
+                                const text = s.textContent || '';
+                                const match = text.match(/(https:\/\/checkout\.stripe\.com\/c\/pay\/cs_live_[^"'\s]+)/);
+                                if (match) return match[1];
+                            }
+                            return null;
+                        }
+                    """)
+                    if stripe_url and _is_stripe_url(stripe_url):
+                        logger.info(f"[AUTO] Found Stripe URL in page scripts (no click): {stripe_url}")
+                        await report("click_upgrade", "done", "Checkout URL found in page data")
+                        return {"success": True, "email": email, "checkout_url": stripe_url}
+                except Exception as e:
+                    logger.info(f"[AUTO] Page script scan failed: {e}")
 
-                # ── Nothing found: debug dump ──
-                if not upgrade_buttons:
+                if not candidates:
                     try:
                         await page.screenshot(path="/tmp/rosebud_pricing_debug.png")
-                        full_html = await page.content()
-                        logger.error(f"[AUTO] DEBUG HTML ({len(full_html)} chars): {full_html[:3000]}")
+                        best_texts = [t for _, t, _ in sorted(all_buttons, key=lambda x: x[2], reverse=True)[:5]]
+                        logger.error(f"[AUTO] No valid candidates. Best scores: {best_texts}")
                     except Exception:
                         pass
-                    await report("click_upgrade", "failed", f"No button found. Buttons: {all_buttons_text[:10]}")
+                    await report("click_upgrade", "failed", "No valid upgrade button found")
                     return {
                         "success": False, "email": email,
-                        "error": f"No checkout button found. Available buttons: {all_buttons_text[:5]}",
+                        "error": f"No valid checkout button. Available: {[t for _, t, _ in all_buttons[:8]]}",
                     }
 
-                # Click the best candidate
-                target, btn_text = upgrade_buttons[0]
+                # Click highest-scored candidate
+                target, btn_text, score, source = candidates[0]
+                logger.info(f"[AUTO] Best candidate: '{btn_text}' (score={score}, source={source})")
+
                 try:
                     if hasattr(target, 'click'):
                         await target.click(force=True)
                     else:
                         await target.click()
                 except Exception as e:
-                    logger.warning(f"[AUTO] Click failed, trying JS click: {e}")
+                    logger.warning(f"[AUTO] Normal click failed: {e}, trying JS click...")
                     try:
                         await page.evaluate("(el) => el.click()", target)
                     except Exception as e2:
