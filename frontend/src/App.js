@@ -1,30 +1,13 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef } from "react";
 import "@/App.css";
-import { motion, useInView, AnimatePresence } from "framer-motion";
+import { motion, useInView } from "framer-motion";
 import Marquee from "react-fast-marquee";
-import axios from "axios";
 import {
-  Bot, Zap, Mail, CreditCard, ChevronRight, Circle,
-  Terminal, ExternalLink, ArrowRight, CheckCircle2, Clock,
-  Loader2, Globe, Sparkles, RefreshCw, Copy, Check
+  Bot, Zap, Mail, CreditCard,
+  Terminal, CheckCircle2, Clock
 } from "lucide-react";
 import { FaTelegram } from "react-icons/fa";
 import { SiStripe } from "react-icons/si";
-
-const API = process.env.REACT_APP_BACKEND_URL + "/api";
-const WS_URL = (process.env.REACT_APP_BACKEND_URL || "").replace(/^http/, "ws") + "/ws";
-
-// ── Progress Steps Config ──
-const PROGRESS_STEPS = [
-  { key: "create_email", label: "Temp Email", icon: Mail },
-  { key: "navigate", label: "Navigate", icon: Globe },
-  { key: "open_signin", label: "Sign In", icon: Terminal },
-  { key: "submit_email", label: "Submit Email", icon: Mail },
-  { key: "wait_email", label: "Verify Email", icon: Clock },
-  { key: "login", label: "Login", icon: CheckCircle2 },
-  { key: "goto_pricing", label: "Pricing", icon: CreditCard },
-  { key: "click_upgrade", label: "Get Checkout", icon: Sparkles },
-];
 
 // ── Terminal Typing Animation ──
 const TerminalWindow = () => {
@@ -90,72 +73,8 @@ const TerminalWindow = () => {
   );
 };
 
-// ── Live Progress Panel ──
-const LiveProgressPanel = ({ progress }) => {
-  const { active, step, step_num, total, status, detail } = progress;
-
-  if (!active && !detail) return null;
-
-  const currentStepIndex = PROGRESS_STEPS.findIndex(s => s.key === step);
-
-  return (
-    <motion.div
-      className="live-progress-panel"
-      initial={{ opacity: 0, y: 20, scale: 0.95 }}
-      animate={{ opacity: 1, y: 0, scale: 1 }}
-      exit={{ opacity: 0, y: -10, scale: 0.95 }}
-      transition={{ duration: 0.4 }}
-    >
-      <div className="live-progress-header">
-        <div className="live-progress-pulse">
-          <Loader2 size={16} className="spin-icon" />
-        </div>
-        <div>
-          <div className="live-progress-title">Live Progress</div>
-          <div className="live-progress-subtitle">
-            {status === "done" ? "Complete!" : detail || "Processing..."}
-          </div>
-        </div>
-      </div>
-
-      <div className="progress-bar-track">
-        <motion.div
-          className="progress-bar-fill"
-          initial={{ width: "0%" }}
-          animate={{ width: `${Math.max(5, (step_num / total) * 100)}%` }}
-          transition={{ duration: 0.5, ease: "easeOut" }}
-        />
-      </div>
-
-      <div className="progress-steps-grid">
-        {PROGRESS_STEPS.map((s, i) => {
-          const isDone = i < currentStepIndex;
-          const isCurrent = i === currentStepIndex;
-          const isPending = i > currentStepIndex;
-          const Icon = s.icon;
-
-          return (
-            <motion.div
-              key={s.key}
-              className={`progress-step ${isDone ? "done" : ""} ${isCurrent ? "current" : ""} ${isPending ? "pending" : ""}`}
-              initial={false}
-              animate={isCurrent ? { scale: [1, 1.05, 1] } : {}}
-              transition={{ duration: 0.6, repeat: isCurrent ? Infinity : 0 }}
-            >
-              <div className="progress-step-icon">
-                {isDone ? <CheckCircle2 size={14} /> : <Icon size={14} />}
-              </div>
-              <span className="progress-step-label">{s.label}</span>
-            </motion.div>
-          );
-        })}
-      </div>
-    </motion.div>
-  );
-};
-
 // ── Status Card ──
-const BotStatusCard = ({ stats }) => (
+const BotStatusCard = () => (
   <motion.div
     data-testid="bot-status-card"
     className="status-card"
@@ -172,12 +91,12 @@ const BotStatusCard = ({ stats }) => (
     </div>
     <div className="status-grid">
       <div className="status-stat">
-        <div data-testid="total-checkouts" className="stat-value">{stats?.total_checkouts ?? "—"}</div>
-        <div className="stat-label">Total Generated</div>
+        <div className="stat-value">∞</div>
+        <div className="stat-label">Unlimited</div>
       </div>
       <div className="status-stat">
-        <div data-testid="success-checkouts" className="stat-value success-val">{stats?.successful_checkouts ?? "—"}</div>
-        <div className="stat-label">Successful</div>
+        <div className="stat-value success-val">100%</div>
+        <div className="stat-label">Uptime</div>
       </div>
     </div>
   </motion.div>
@@ -207,176 +126,7 @@ const StepCard = ({ number, icon: Icon, title, desc, delay }) => {
   );
 };
 
-// ── Checkout Row ──
-const CheckoutRow = ({ row, index }) => {
-  const [copied, setCopied] = useState(false);
-
-  const handleCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(row.checkout_url);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch (e) {
-      console.error("Copy failed", e);
-    }
-  };
-
-  return (
-    <motion.div
-      key={index}
-      className="table-row"
-      data-testid={`table-row-${index}`}
-      initial={{ opacity: 0, x: -10 }}
-      animate={{ opacity: 1, x: 0 }}
-      transition={{ delay: index * 0.05 }}
-    >
-      <div className="table-cell email">{row.email}</div>
-      <div className="table-cell link">
-        <span className="url-truncate">{row.checkout_url}</span>
-      </div>
-      <div className="table-cell actions">
-        <button className="action-btn copy-btn" onClick={handleCopy} title="Copy URL">
-          {copied ? <Check size={13} /> : <Copy size={13} />}
-        </button>
-        <a
-          href={row.checkout_url}
-          target="_blank"
-          rel="noreferrer"
-          className="action-btn open-btn"
-          title="Open Checkout"
-        >
-          <ExternalLink size={13} />
-          Open
-        </a>
-      </div>
-      <div className="table-cell time">
-        <Clock size={12} />
-        {new Date(row.created_at).toLocaleTimeString()}
-      </div>
-    </motion.div>
-  );
-};
-
-// ── Checkouts Table ──
-const CheckoutsTable = ({ data }) => (
-  <motion.div
-    data-testid="checkouts-table"
-    className="checkouts-table-wrap"
-    initial={{ opacity: 0 }}
-    whileInView={{ opacity: 1 }}
-    transition={{ duration: 0.8 }}
-    viewport={{ once: true }}
-  >
-    <div className="table-header-row">
-      <div className="table-title">Recent Checkouts</div>
-      <div className="table-badge">{data.length} entries</div>
-    </div>
-    <div className="table-header">
-      <div className="table-hcell">Email</div>
-      <div className="table-hcell">Checkout Link</div>
-      <div className="table-hcell">Actions</div>
-      <div className="table-hcell">Time</div>
-    </div>
-    <div className="table-scroll">
-      {data.length === 0 ? (
-        <div className="table-empty">
-          <Bot size={32} className="table-empty-icon" />
-          <p>No checkouts yet — run <code>/gen_checkout</code> in the bot!</p>
-        </div>
-      ) : (
-        data.map((row, i) => <CheckoutRow key={i} row={row} index={i} />)
-      )}
-    </div>
-  </motion.div>
-);
-
-// ── Main App ──
 function App() {
-  const [stats, setStats] = useState(null);
-  const [checkouts, setCheckouts] = useState([]);
-  const [progress, setProgress] = useState({ active: false, step: "", step_num: 0, total: 8, status: "", detail: "" });
-  const wsRef = useRef(null);
-
-  // Fetch initial data
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const [s, c] = await Promise.all([
-          axios.get(`${API}/status`),
-          axios.get(`${API}/checkouts`)
-        ]);
-        setStats(s.data);
-        setCheckouts(c.data);
-      } catch (e) {
-        console.error("API error:", e);
-      }
-    };
-    fetchData();
-    const interval = setInterval(fetchData, 15000);
-    return () => clearInterval(interval);
-  }, []);
-
-  // WebSocket for live progress
-  useEffect(() => {
-    if (!WS_URL || WS_URL.includes("undefined")) return;
-
-    const connectWs = () => {
-      try {
-        const ws = new WebSocket(WS_URL);
-        wsRef.current = ws;
-
-        ws.onopen = () => {
-          console.log("WebSocket connected");
-          // Send a generic subscribe (frontend watches all)
-          ws.send(JSON.stringify({ chat_id: 0, type: "subscribe" }));
-        };
-
-        ws.onmessage = (event) => {
-          try {
-            const data = JSON.parse(event.data);
-            if (data.type === "progress") {
-              setProgress({
-                active: data.status !== "done" && data.status !== "failed",
-                step: data.step,
-                step_num: data.step_num,
-                total: data.total,
-                status: data.status,
-                detail: data.detail,
-              });
-
-              // Refresh checkouts when done
-              if (data.status === "done") {
-                setTimeout(() => {
-                  axios.get(`${API}/checkouts`).then(r => setCheckouts(r.data));
-                  axios.get(`${API}/status`).then(r => setStats(r.data));
-                }, 1000);
-              }
-            }
-          } catch (e) {
-            console.error("WS parse error:", e);
-          }
-        };
-
-        ws.onclose = () => {
-          console.log("WebSocket closed, reconnecting in 3s...");
-          setTimeout(connectWs, 3000);
-        };
-
-        ws.onerror = (err) => {
-          console.error("WebSocket error:", err);
-          ws.close();
-        };
-      } catch (e) {
-        console.error("WS connect error:", e);
-      }
-    };
-
-    connectWs();
-    return () => {
-      if (wsRef.current) wsRef.current.close();
-    };
-  }, []);
-
   return (
     <div className="app-root">
       {/* HERO */}
@@ -434,14 +184,9 @@ function App() {
             </div>
           </motion.div>
 
-          {/* Live Progress Panel */}
-          <AnimatePresence>
-            <LiveProgressPanel progress={progress} />
-          </AnimatePresence>
-
           <div className="hero-grid">
             <TerminalWindow />
-            <BotStatusCard stats={stats} />
+            <BotStatusCard />
           </div>
         </div>
       </section>
@@ -449,7 +194,7 @@ function App() {
       {/* MARQUEE STRIP */}
       <div className="marquee-strip">
         <Marquee speed={50} gradient={false} autoFill>
-          {["TEMP MAIL", "AUTO SIGNUP", "STRIPE CHECKOUT", "ROSEBUD.AI", "ONE COMMAND", "INSTANT RESULTS", "LIVE PROGRESS", "TELEGRAM BOT"].map((t, i) => (
+          {["TEMP MAIL", "AUTO SIGNUP", "STRIPE CHECKOUT", "ROSEBUD.AI", "ONE COMMAND", "INSTANT RESULTS", "TELEGRAM BOT"].map((t, i) => (
             <span key={i} className="marquee-item">
               <span className="marquee-dot" />
               {t}
@@ -538,19 +283,6 @@ function App() {
               ))}
             </div>
           </div>
-        </div>
-      </section>
-
-      {/* RECENT CHECKOUTS */}
-      <section className="history-section">
-        <div className="section-container">
-          <motion.div className="section-label" initial={{ opacity: 0 }} whileInView={{ opacity: 1 }} viewport={{ once: true }}>
-            Activity Log
-          </motion.div>
-          <motion.h2 className="section-title" initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }}>
-            Recent Generated Checkouts
-          </motion.h2>
-          <CheckoutsTable data={checkouts} />
         </div>
       </section>
 
